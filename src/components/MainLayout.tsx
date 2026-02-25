@@ -37,6 +37,8 @@ interface MainLayoutProps {
     role?: string;
     avatar?: string;
   };
+  currentPage?: string;
+  onPageChange?: (pageId: string) => void;
   children?: React.ReactNode;
 }
 
@@ -70,8 +72,16 @@ const sectionTitles = {
   admin: 'ADMIN',
 };
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ onLogout, user, children }) => {
-  const [currentPage, setCurrentPage] = useState('overview');
+export const MainLayout: React.FC<MainLayoutProps> = ({
+  onLogout,
+  user,
+  currentPage,
+  onPageChange,
+  children,
+}) => {
+  const [internalPage, setInternalPage] = useState('overview');
+  const activePage = currentPage ?? internalPage;
+  const handlePageChange = onPageChange ?? setInternalPage;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const getInitials = (name: string = 'User') => {
@@ -131,12 +141,12 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ onLogout, user, children
                 return (
                   <button
                     key={item.id}
-                    className={`nav-item ${currentPage === item.id ? 'active' : ''}`}
-                    onClick={() => setCurrentPage(item.id)}
+                    className={`nav-item ${activePage === item.id ? 'active' : ''}`}
+                    onClick={() => handlePageChange(item.id)}
                   >
                     <span className="nav-icon"><IconComponent /></span>
                     <span className="nav-label">{item.label}</span>
-                    {currentPage === item.id && <span className="active-indicator" />}
+                    {activePage === item.id && <span className="active-indicator" />}
                   </button>
                 );
               })}
@@ -157,7 +167,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ onLogout, user, children
           <div className="page-header">
             <div className="header-top">
               <h1>
-                {navItems.find(item => item.id === currentPage)?.label || 'Dashboard'}
+                {navItems.find(item => item.id === activePage)?.label || 'Dashboard'}
               </h1>
             </div>
             <p className="page-description">
@@ -168,7 +178,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ onLogout, user, children
           {/* Page Content */}
           <div className="page-content">
             {children ||
-              (currentPage === 'department-role' ? (
+              (activePage === 'department-role' ? (
                 <DepartmentRole />
               ) : (
                 <div className="placeholder-content">

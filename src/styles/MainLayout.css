@@ -8,8 +8,8 @@
 }
 
 :root {
-  --primary-gradient: linear-gradient(135deg, #9397a8 0%, #5a595c 100%);
-  --primary-light: rgba(102, 126, 234, 0.1);
+  --primary-gradient: linear-gradient(135deg, #474747 0%, #b5b3b9 100%);
+  --primary-light: rgba(143, 148, 170, 0.1);
   --primary-color: #667eea;
   --secondary-color: #764ba2;
   --text-primary: #1e293b;
@@ -446,6 +446,8 @@ body {
 /* Page Content */
 .page-content {
   animation: fadeIn 0.3s ease;
+  width: 100%;
+  max-width: none;
 }
 
 @keyframes fadeIn {
