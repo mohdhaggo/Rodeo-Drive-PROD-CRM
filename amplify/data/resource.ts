@@ -12,6 +12,21 @@ const schema = a.schema({
       content: a.string(),
     })
     .authorization((allow) => [allow.publicApiKey()]),
+  Department: a
+    .model({
+      name: a.string().required(),
+      description: a.string(),
+      roles: a.hasMany("Role", "departmentId"),
+    })
+    .authorization((allow) => [allow.publicApiKey()]),
+  Role: a
+    .model({
+      name: a.string().required(),
+      description: a.string(),
+      departmentId: a.id().required(),
+      department: a.belongsTo("Department", "departmentId"),
+    })
+    .authorization((allow) => [allow.publicApiKey()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;

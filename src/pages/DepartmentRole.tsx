@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '../../amplify/data/resource';
 import './DepartmentRole.css';
 
 interface Role {
-  id: number;
+  id: string;
   name: string;
   description: string;
+  departmentId: string;
 }
 
 interface Department {
-  id: number;
+  id: string;
   name: string;
   description: string;
   roles: Role[];
@@ -25,6 +28,10 @@ interface AlertOptions {
   }>;
 }
 
+const client = generateClient<Schema>();
+
+const DEPARTMENTS_STORAGE_KEY = 'departments_cache';
+
 const DepartmentRole: React.FC = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [showAddDeptModal, setShowAddDeptModal] = useState(false);
@@ -32,15 +39,16 @@ const DepartmentRole: React.FC = () => {
   const [showEditDeptModal, setShowEditDeptModal] = useState(false);
   const [showEditRoleModal, setShowEditRoleModal] = useState(false);
   const [showAlert, setShowAlert] = useState(false);
+  const [useLocalStorage, setUseLocalStorage] = useState(false);
   const [alertOptions, setAlertOptions] = useState<AlertOptions>({
     title: '',
     message: '',
     type: 'info',
   });
 
-  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
-  const [editingRole, setEditingRole] = useState<{ deptId: number; role: Role } | null>(null);
+  const [editingRole, setEditingRole] = useState<{ deptId: string; role: Role } | null>(null);
 
   const deptNameRef = useRef<HTMLInputElement>(null);
   const deptDescRef = useRef<HTMLTextAreaElement>(null);
@@ -58,6 +66,7 @@ const DepartmentRole: React.FC = () => {
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, []);
+
 
   useEffect(() => {
     if (showAddDeptModal && deptNameRef.current) {
@@ -99,6 +108,65 @@ const DepartmentRole: React.FC = () => {
     }
   };
 
+  const saveDepartsToLocalStorage = (depts: Department[]) => {
+    localStorage.setItem(DEPARTMENTS_STORAGE_KEY, JSON.stringify(depts));
+  };
+
+  const loadDepartmentsFromLocalStorage = (): Department[] => {
+    try {
+      const stored = localStorage.getItem(DEPARTMENTS_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const generateId = (): string => {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  };
+
+  const loadDepartments = async () => {
+    try {
+      const [{ data: deptData }, { data: roleData }] = await Promise.all([
+        client.models.Department.list(),
+        client.models.Role.list(),
+      ]);
+
+      const rolesByDept = new Map<string, Role[]>();
+      (roleData ?? []).forEach(role => {
+        if (!role.departmentId) return;
+        const mappedRole: Role = {
+          id: role.id,
+          name: role.name ?? '',
+          description: role.description ?? '',
+          departmentId: role.departmentId,
+        };
+        const existing = rolesByDept.get(role.departmentId) ?? [];
+        rolesByDept.set(role.departmentId, [...existing, mappedRole]);
+      });
+
+      const mappedDepartments = (deptData ?? []).map(dept => ({
+        id: dept.id,
+        name: dept.name ?? '',
+        description: dept.description ?? '',
+        roles: rolesByDept.get(dept.id) ?? [],
+      }));
+
+      setDepartments(mappedDepartments);
+      setUseLocalStorage(false);
+    } catch (error) {
+      // Backend models not deployed yet, fall back to localStorage
+      console.warn('Backend models not available, using localStorage:', error);
+      const stored = loadDepartmentsFromLocalStorage();
+      setDepartments(stored);
+      setUseLocalStorage(true);
+    }
+  };
+
+  useEffect(() => {
+    void loadDepartments();
+  }, []);
+
   const getStats = () => {
     const totalDepartments = departments.length;
     const totalRoles = departments.reduce((acc, dept) => acc + dept.roles.length, 0);
@@ -107,7 +175,7 @@ const DepartmentRole: React.FC = () => {
     return { totalDepartments, totalRoles, avgRoles };
   };
 
-  const handleAddDepartment = (e: React.FormEvent) => {
+  const handleAddDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const name = deptNameRef.current?.value.trim();
@@ -122,30 +190,53 @@ const DepartmentRole: React.FC = () => {
       return;
     }
 
-    const newId = departments.length > 0 ? Math.max(...departments.map(d => d.id)) + 1 : 1;
+    try {
+      if (useLocalStorage) {
+        // Use localStorage
+        const newDept: Department = {
+          id: generateId(),
+          name,
+          description,
+          roles: [],
+        };
+        
+        const updated = [...departments, newDept];
+        setDepartments(updated);
+        saveDepartsToLocalStorage(updated);
+      } else {
+        // Try backend first
+        const { data, errors } = await client.models.Department.create({
+          name,
+          description,
+        });
 
-    setDepartments(prev => [
-      ...prev,
-      {
-        id: newId,
-        name,
-        description,
-        roles: [],
-      },
-    ]);
+        if (!data || (errors && errors.length > 0)) {
+          throw new Error('Failed to create department');
+        }
 
-    if (deptNameRef.current) deptNameRef.current.value = '';
-    if (deptDescRef.current) deptDescRef.current.value = '';
+        await loadDepartments();
+      }
 
-    closeAllModals();
-    showAlertMessage({
-      title: 'Success',
-      message: 'Department added successfully!',
-      type: 'success',
-    });
+      if (deptNameRef.current) deptNameRef.current.value = '';
+      if (deptDescRef.current) deptDescRef.current.value = '';
+
+      closeAllModals();
+      showAlertMessage({
+        title: 'Success',
+        message: 'Department added successfully!',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Add department error:', error);
+      showAlertMessage({
+        title: 'Error',
+        message: 'Unable to add department. Please try again.',
+        type: 'error',
+      });
+    }
   };
 
-  const handleAddRole = (e: React.FormEvent) => {
+  const handleAddRole = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const name = roleNameRef.current?.value.trim();
@@ -162,40 +253,63 @@ const DepartmentRole: React.FC = () => {
 
     if (!selectedDeptId) return;
 
-    const allRoleIds = departments.flatMap(d => d.roles.map(r => r.id));
-    const newRoleId = allRoleIds.length > 0 ? Math.max(...allRoleIds) + 1 : 1;
+    try {
+      if (useLocalStorage) {
+        // Use localStorage
+        const updated = departments.map(dept => {
+          if (dept.id === selectedDeptId) {
+            return {
+              ...dept,
+              roles: [
+                ...dept.roles,
+                {
+                  id: generateId(),
+                  name,
+                  description,
+                  departmentId: selectedDeptId,
+                },
+              ],
+            };
+          }
+          return dept;
+        });
+        setDepartments(updated);
+        saveDepartsToLocalStorage(updated);
+      } else {
+        // Try backend
+        const { data, errors } = await client.models.Role.create({
+          name,
+          description,
+          departmentId: selectedDeptId,
+        });
 
-    setDepartments(prev =>
-      prev.map(dept => {
-        if (dept.id === selectedDeptId) {
-          return {
-            ...dept,
-            roles: [
-              ...dept.roles,
-              {
-                id: newRoleId,
-                name,
-                description,
-              },
-            ],
-          };
+        if (!data || (errors && errors.length > 0)) {
+          throw new Error('Failed to create role');
         }
-        return dept;
-      })
-    );
 
-    if (roleNameRef.current) roleNameRef.current.value = '';
-    if (roleDescRef.current) roleDescRef.current.value = '';
+        await loadDepartments();
+      }
 
-    closeAllModals();
-    showAlertMessage({
-      title: 'Success',
-      message: 'Role added successfully!',
-      type: 'success',
-    });
+      if (roleNameRef.current) roleNameRef.current.value = '';
+      if (roleDescRef.current) roleDescRef.current.value = '';
+
+      closeAllModals();
+      showAlertMessage({
+        title: 'Success',
+        message: 'Role added successfully!',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Add role error:', error);
+      showAlertMessage({
+        title: 'Error',
+        message: 'Unable to add role. Please try again.',
+        type: 'error',
+      });
+    }
   };
 
-  const handleUpdateDepartment = (e: React.FormEvent) => {
+  const handleUpdateDepartment = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!editingDept) return;
@@ -213,28 +327,51 @@ const DepartmentRole: React.FC = () => {
       return;
     }
 
-    setDepartments(prev =>
-      prev.map(dept => {
-        if (dept.id === editingDept.id) {
-          return {
-            ...dept,
-            name,
-            description,
-          };
-        }
-        return dept;
-      })
-    );
+    try {
+      if (useLocalStorage) {
+        const updated = departments.map(dept => {
+          if (dept.id === editingDept.id) {
+            return {
+              ...dept,
+              name,
+              description,
+            };
+          }
+          return dept;
+        });
+        setDepartments(updated);
+        saveDepartsToLocalStorage(updated);
+      } else {
+        const { data, errors } = await client.models.Department.update({
+          id: editingDept.id,
+          name,
+          description,
+        });
 
-    closeAllModals();
-    showAlertMessage({
-      title: 'Success',
-      message: 'Department updated successfully!',
-      type: 'success',
-    });
+        if (!data || (errors && errors.length > 0)) {
+          throw new Error('Failed to update department');
+        }
+
+        await loadDepartments();
+      }
+
+      closeAllModals();
+      showAlertMessage({
+        title: 'Success',
+        message: 'Department updated successfully!',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Update department error:', error);
+      showAlertMessage({
+        title: 'Error',
+        message: 'Unable to update department. Please try again.',
+        type: 'error',
+      });
+    }
   };
 
-  const handleUpdateRole = (e: React.FormEvent) => {
+  const handleUpdateRole = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!editingRole) return;
@@ -252,36 +389,79 @@ const DepartmentRole: React.FC = () => {
       return;
     }
 
-    setDepartments(prev =>
-      prev.map(dept => {
-        if (dept.id === editingRole.deptId) {
-          return {
-            ...dept,
-            roles: dept.roles.map(role => {
-              if (role.id === editingRole.role.id) {
-                return {
-                  ...role,
-                  name,
-                  description,
-                };
-              }
-              return role;
-            }),
-          };
-        }
-        return dept;
-      })
-    );
+    try {
+      if (useLocalStorage) {
+        const updated = departments.map(dept => {
+          if (dept.id === editingRole.deptId) {
+            return {
+              ...dept,
+              roles: dept.roles.map(role => {
+                if (role.id === editingRole.role.id) {
+                  return {
+                    ...role,
+                    name,
+                    description,
+                  };
+                }
+                return role;
+              }),
+            };
+          }
+          return dept;
+        });
+        setDepartments(updated);
+        saveDepartsToLocalStorage(updated);
+      } else {
+        const { data, errors } = await client.models.Role.update({
+          id: editingRole.role.id,
+          name,
+          description,
+        });
 
-    closeAllModals();
-    showAlertMessage({
-      title: 'Success',
-      message: 'Role updated successfully!',
-      type: 'success',
-    });
+        if (!data || (errors && errors.length > 0)) {
+          throw new Error('Failed to update role');
+        }
+
+        await loadDepartments();
+      }
+
+      closeAllModals();
+      showAlertMessage({
+        title: 'Success',
+        message: 'Role updated successfully!',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Update role error:', error);
+      showAlertMessage({
+        title: 'Error',
+        message: 'Unable to update role. Please try again.',
+        type: 'error',
+      });
+    }
   };
 
-  const handleDeleteDepartment = (deptId: number) => {
+  const deleteDepartmentAndRoles = async (deptId: string) => {
+    if (useLocalStorage) {
+      const updated = departments.filter(d => d.id !== deptId);
+      setDepartments(updated);
+      saveDepartsToLocalStorage(updated);
+    } else {
+      const { data: roleData } = await client.models.Role.list({
+        filter: {
+          departmentId: { eq: deptId },
+        },
+      });
+
+      await Promise.all(
+        (roleData ?? []).map(role => client.models.Role.delete({ id: role.id }))
+      );
+
+      await client.models.Department.delete({ id: deptId });
+    }
+  };
+
+  const handleDeleteDepartment = (deptId: string) => {
     const department = departments.find(d => d.id === deptId);
     if (!department) return;
 
@@ -299,20 +479,34 @@ const DepartmentRole: React.FC = () => {
           text: 'Delete',
           class: 'alert-btn-danger',
           action: () => {
-            setDepartments(prev => prev.filter(d => d.id !== deptId));
-            closeAlert();
-            showAlertMessage({
-              title: 'Success',
-              message: 'Department deleted successfully!',
-              type: 'success',
-            });
+            void (async () => {
+              try {
+                await deleteDepartmentAndRoles(deptId);
+                if (!useLocalStorage) {
+                  await loadDepartments();
+                }
+                closeAlert();
+                showAlertMessage({
+                  title: 'Success',
+                  message: 'Department deleted successfully!',
+                  type: 'success',
+                });
+              } catch (error) {
+                console.error('Delete department error:', error);
+                showAlertMessage({
+                  title: 'Error',
+                  message: 'Unable to delete department. Please try again.',
+                  type: 'error',
+                });
+              }
+            })();
           },
         },
       ],
     });
   };
 
-  const handleDeleteRole = (deptId: number, roleId: number) => {
+  const handleDeleteRole = (deptId: string, roleId: string) => {
     const department = departments.find(d => d.id === deptId);
     const role = department?.roles.find(r => r.id === roleId);
     if (!department || !role) return;
@@ -331,30 +525,46 @@ const DepartmentRole: React.FC = () => {
           text: 'Delete',
           class: 'alert-btn-danger',
           action: () => {
-            setDepartments(prev =>
-              prev.map(dept => {
-                if (dept.id === deptId) {
-                  return {
-                    ...dept,
-                    roles: dept.roles.filter(r => r.id !== roleId),
-                  };
+            void (async () => {
+              try {
+                if (useLocalStorage) {
+                  const updated = departments.map(dept => {
+                    if (dept.id === deptId) {
+                      return {
+                        ...dept,
+                        roles: dept.roles.filter(r => r.id !== roleId),
+                      };
+                    }
+                    return dept;
+                  });
+                  setDepartments(updated);
+                  saveDepartsToLocalStorage(updated);
+                } else {
+                  await client.models.Role.delete({ id: roleId });
+                  await loadDepartments();
                 }
-                return dept;
-              })
-            );
-            closeAlert();
-            showAlertMessage({
-              title: 'Success',
-              message: 'Role deleted successfully!',
-              type: 'success',
-            });
+                closeAlert();
+                showAlertMessage({
+                  title: 'Success',
+                  message: 'Role deleted successfully!',
+                  type: 'success',
+                });
+              } catch (error) {
+                console.error('Delete role error:', error);
+                showAlertMessage({
+                  title: 'Error',
+                  message: 'Unable to delete role. Please try again.',
+                  type: 'error',
+                });
+              }
+            })();
           },
         },
       ],
     });
   };
 
-  const openAddRoleModal = (deptId: number) => {
+  const openAddRoleModal = (deptId: string) => {
     setSelectedDeptId(deptId);
     openModal(setShowAddRoleModal);
   };
@@ -364,7 +574,7 @@ const DepartmentRole: React.FC = () => {
     openModal(setShowEditDeptModal);
   };
 
-  const openEditRoleModal = (deptId: number, role: Role) => {
+  const openEditRoleModal = (deptId: string, role: Role) => {
     setEditingRole({ deptId, role });
     openModal(setShowEditRoleModal);
   };
