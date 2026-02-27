@@ -1,5 +1,9 @@
-import { defineAuth } from '@aws-amplify/backend';
-import { postConfirmation } from './post-confirmation/resource';
+import { defineAuth, defineFunction } from '@aws-amplify/backend';
+
+const postConfirmation = defineFunction({
+  name: 'post-confirmation',
+  entry: './post-confirmation/handler.ts',
+});
 
 /**
  * Define and configure your auth resource
