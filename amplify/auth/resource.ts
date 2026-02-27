@@ -9,7 +9,7 @@ export const auth = defineAuth({
   loginWith: {
     email: true,
   },
-  accountRecovery: 'email',
+  accountRecovery: 'EMAIL_ONLY',
   userAttributes: {
     email: {
       mutable: true,

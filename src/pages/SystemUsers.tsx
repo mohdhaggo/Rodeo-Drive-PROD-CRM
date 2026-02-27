@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
+import { invokeFunction } from 'aws-amplify/functions';
 import type { Schema } from '../../amplify/data/resource';
 import './DepartmentRole.css';
 
@@ -259,6 +260,24 @@ const SystemUsers: React.FC = () => {
           type: 'error',
         });
         return;
+      }
+
+      // Send welcome email to the new user
+      try {
+        await invokeFunction({
+          functionName: 'send-welcome-email',
+          payload: {
+            email,
+            name: employeeName,
+            employeeId,
+            department: dept.name,
+            role: role.name,
+          },
+        });
+        console.log(`Welcome email sent to ${email}`);
+      } catch (emailError) {
+        console.error('Error sending welcome email:', emailError);
+        // Don't block user creation if email fails
       }
 
       // Reload users from backend to stay in sync
