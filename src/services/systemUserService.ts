@@ -46,6 +46,26 @@ export interface Role {
   departmentId: string;
 }
 
+interface ErrorWithNameAndMessage {
+  name?: string;
+  message?: string;
+}
+
+const getErrorDetails = (error: unknown): ErrorWithNameAndMessage => {
+  if (typeof error === 'object' && error !== null) {
+    return error as ErrorWithNameAndMessage;
+  }
+  return {};
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  const details = getErrorDetails(error);
+  return details.message ?? fallback;
+};
+
 /**
  * System User Service
  * Handles all CRUD operations for system users
@@ -138,12 +158,13 @@ export const systemUserService = {
         });
         
         console.log('Cognito user created. Verification email sent to:', userData.email);
-      } catch (cognitoError: any) {
+      } catch (cognitoError: unknown) {
         console.error('Cognito user creation error:', cognitoError);
-        if (cognitoError.name === 'UsernameExistsException') {
+        const details = getErrorDetails(cognitoError);
+        if (details.name === 'UsernameExistsException') {
           throw new Error('A user with this email already exists in the system');
         }
-        throw new Error('Failed to create authentication account: ' + cognitoError.message);
+        throw new Error('Failed to create authentication account: ' + getErrorMessage(cognitoError, 'Unknown error'));
       }
 
       // Create user in database
@@ -195,19 +216,20 @@ export const systemUserService = {
       await resetPassword({ username: email });
       console.log('Password reset email sent to:', email);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error sending password reset email:', error);
+      const details = getErrorDetails(error);
       
       // Handle specific Cognito errors
-      if (error.name === 'InvalidParameterException' || error.message?.includes('no registered/verified email')) {
+      if (details.name === 'InvalidParameterException' || details.message?.includes('no registered/verified email')) {
         throw new Error('The user has not verified their email address yet. Please ask the user to check their email and verify their account first.');
       }
       
-      if (error.name === 'UserNotFoundException') {
+      if (details.name === 'UserNotFoundException') {
         throw new Error('User not found in the authentication system.');
       }
       
-      throw new Error('Failed to send password reset email: ' + error.message);
+      throw new Error('Failed to send password reset email: ' + getErrorMessage(error, 'Unknown error'));
     }
   },
 
@@ -219,18 +241,19 @@ export const systemUserService = {
       await resendSignUpCode({ username: email });
       console.log('Verification email resent to:', email);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error resending verification email:', error);
+      const details = getErrorDetails(error);
       
-      if (error.name === 'UserNotFoundException') {
+      if (details.name === 'UserNotFoundException') {
         throw new Error('User not found in the authentication system.');
       }
       
-      if (error.name === 'InvalidParameterException' && error.message?.includes('already confirmed')) {
+      if (details.name === 'InvalidParameterException' && details.message?.includes('already confirmed')) {
         throw new Error('This user has already verified their email address.');
       }
       
-      throw new Error('Failed to resend verification email: ' + error.message);
+      throw new Error('Failed to resend verification email: ' + getErrorMessage(error, 'Unknown error'));
     }
   },
 
@@ -579,10 +602,10 @@ export const systemUserService = {
     try {
       const users = await this.getAllUsers();
       const total = users.length;
-      const active = users.filter((u: any) => u.status === 'active').length;
-      const inactive = users.filter((u: any) => u.status === 'inactive').length;
-      const allowedAccess = users.filter((u: any) => u.dashboardAccess === 'allowed').length;
-      const blockedAccess = users.filter((u: any) => u.dashboardAccess === 'blocked').length;
+      const active = users.filter(u => u.status === 'active').length;
+      const inactive = users.filter(u => u.status === 'inactive').length;
+      const allowedAccess = users.filter(u => u.dashboardAccess === 'allowed').length;
+      const blockedAccess = users.filter(u => u.dashboardAccess === 'blocked').length;
 
       return {
         total,
@@ -605,7 +628,7 @@ export const systemUserService = {
       const users = await this.getAllUsers();
       const lowerQuery = query.toLowerCase();
       
-      return users.filter((user: any) =>
+      return users.filter(user =>
         user.employeeId.toLowerCase().includes(lowerQuery) ||
         user.name.toLowerCase().includes(lowerQuery) ||
         user.email.toLowerCase().includes(lowerQuery) ||

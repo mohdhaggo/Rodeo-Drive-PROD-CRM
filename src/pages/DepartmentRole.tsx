@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify/data/resource';
 import './DepartmentRole.css';
@@ -125,7 +125,7 @@ const DepartmentRole: React.FC = () => {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
 
-  const loadDepartments = async () => {
+  const loadDepartments = useCallback(async () => {
     try {
       const [{ data: deptData }, { data: roleData }] = await Promise.all([
         client.models.Department.list(),
@@ -161,11 +161,11 @@ const DepartmentRole: React.FC = () => {
       setDepartments(stored);
       setUseLocalStorage(true);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadDepartments();
-  }, []);
+  }, [loadDepartments]);
 
   const getStats = () => {
     const totalDepartments = departments.length;

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify/data/resource';
 import { systemUserService } from '../services/systemUserService';
@@ -47,7 +47,25 @@ interface AlertOptions {
   }>;
 }
 
+interface RawSystemUser {
+  id: string;
+  employeeId?: string | null;
+  name?: string | null;
+  email?: string | null;
+  mobile?: string | null;
+  departmentId?: string | null;
+  roleId?: string | null;
+  lineManagerId?: string | null;
+  status?: string | null;
+  dashboardAccess?: string | null;
+  failedLoginAttempts?: number | null;
+}
+
 const client = generateClient<Schema>();
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  return error instanceof Error ? error.message : fallback;
+};
 
 const SystemUsers: React.FC = () => {
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -115,14 +133,14 @@ const SystemUsers: React.FC = () => {
 
   // Helper: resolve department/role/manager names from raw backend user
   const enrichUser = (
-    raw: any,
+    raw: RawSystemUser,
     depts: Department[],
-    allRawUsers: any[]
+    allRawUsers: RawSystemUser[]
   ): SystemUser => {
     const dept = depts.find(d => d.id === raw.departmentId);
     const role = dept?.roles.find(r => r.id === raw.roleId);
     const manager = raw.lineManagerId
-      ? allRawUsers.find((u: any) => u.id === raw.lineManagerId)
+      ? allRawUsers.find(u => u.id === raw.lineManagerId)
       : null;
 
     return {
@@ -143,7 +161,7 @@ const SystemUsers: React.FC = () => {
     };
   };
 
-  const loadDepartments = async (): Promise<Department[]> => {
+  const loadDepartments = useCallback(async (): Promise<Department[]> => {
     try {
       const [{ data: deptData }, { data: roleData }] = await Promise.all([
         client.models.Department.list(),
@@ -176,25 +194,25 @@ const SystemUsers: React.FC = () => {
       console.error('Error loading departments:', error);
       return [];
     }
-  };
+  }, []);
 
-  const loadUsers = async (depts?: Department[]) => {
+  const loadUsers = useCallback(async (depts: Department[]) => {
     setIsLoading(true);
     try {
-      const resolvedDepts = depts ?? departments;
       const { data: rawUsers, errors } = await client.models.SystemUser.list();
       if (errors) {
         console.error('Error loading users:', errors);
         return;
       }
-      const enriched = (rawUsers ?? []).map(u => enrichUser(u, resolvedDepts, rawUsers ?? []));
+      const typedRawUsers = (rawUsers ?? []) as RawSystemUser[];
+      const enriched = typedRawUsers.map(u => enrichUser(u, depts, typedRawUsers));
       setUsers(enriched);
     } catch (error) {
       console.error('Error loading users from backend:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -202,7 +220,7 @@ const SystemUsers: React.FC = () => {
       await loadUsers(depts);
     };
     void init();
-  }, []);
+  }, [loadDepartments, loadUsers]);
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -255,7 +273,7 @@ const SystemUsers: React.FC = () => {
       });
 
       // Reload users from backend to stay in sync
-      await loadUsers();
+      await loadUsers(departments);
 
       if (employeeIdRef.current) employeeIdRef.current.value = '';
       if (employeeNameRef.current) employeeNameRef.current.value = '';
@@ -272,11 +290,11 @@ const SystemUsers: React.FC = () => {
         message: `User created successfully! A verification email with temporary password has been sent to ${email}. IMPORTANT: The user must verify their email before you can send password reset emails.`,
         type: 'success',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating user:', error);
       showAlertMessage({
         title: 'Error',
-        message: error.message || 'Failed to create user. Please try again.',
+        message: getErrorMessage(error, 'Failed to create user. Please try again.'),
         type: 'error',
       });
     } finally {
@@ -284,8 +302,8 @@ const SystemUsers: React.FC = () => {
     }
   };
 
-  const handleUpdateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateUser = async (e?: React.FormEvent) => {
+    e?.preventDefault();
 
     if (!viewingUser) return;
 
@@ -342,7 +360,7 @@ const SystemUsers: React.FC = () => {
       }
 
       // Reload and update local state
-      await loadUsers();
+      await loadUsers(departments);
 
       // Update the viewing user with resolved names
       const lineManagerName = lineManagerId ? users.find(u => u.id === lineManagerId)?.employeeName : '';
@@ -409,7 +427,7 @@ const SystemUsers: React.FC = () => {
                 });
                 return;
               }
-              await loadUsers();
+              await loadUsers(departments);
               closeAlert();
               showAlertMessage({
                 title: 'Success',
@@ -451,11 +469,11 @@ const SystemUsers: React.FC = () => {
                 message: `Verification email resent to ${viewingUser.email}. The user will receive an email with a link to verify their account.`,
                 type: 'success',
               });
-            } catch (error: any) {
+            } catch (error: unknown) {
               console.error('Error resending verification email:', error);
               showAlertMessage({
                 title: 'Error',
-                message: error.message || 'Failed to resend verification email. Please try again.',
+                message: getErrorMessage(error, 'Failed to resend verification email. Please try again.'),
                 type: 'error',
               });
             }
@@ -562,11 +580,11 @@ const SystemUsers: React.FC = () => {
                 message: `Password reset email sent to ${viewingUser.email}. The user will receive an email with instructions to reset their password.`,
                 type: 'success',
               });
-            } catch (error: any) {
+            } catch (error: unknown) {
               console.error('Error sending password reset email:', error);
               showAlertMessage({
                 title: 'Error',
-                message: error.message || 'Failed to send password reset email. Please try again.',
+                message: getErrorMessage(error, 'Failed to send password reset email. Please try again.'),
                 type: 'error',
               });
             }
@@ -791,7 +809,7 @@ const SystemUsers: React.FC = () => {
                           className="btn btn-success"
                           onClick={(e) => {
                             e.preventDefault();
-                            handleUpdateUser(e as any);
+                            void handleUpdateUser();
                           }}
                         >
                           <i className="fas fa-save"></i> Save Changes
