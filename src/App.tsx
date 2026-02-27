@@ -64,7 +64,7 @@ export default function App() {
   };
 
   return (
-    <Authenticator>
+    <Authenticator hideSignUp>
       {({ signOut, user }) => (
         <MainLayout 
           onLogout={signOut || (() => {})} 
