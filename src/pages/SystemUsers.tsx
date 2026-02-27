@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
-import { invokeFunction } from 'aws-amplify/functions';
 import type { Schema } from '../../amplify/data/resource';
 import './DepartmentRole.css';
 
@@ -262,23 +261,11 @@ const SystemUsers: React.FC = () => {
         return;
       }
 
-      // Send welcome email to the new user
-      try {
-        await invokeFunction({
-          functionName: 'send-welcome-email',
-          payload: {
-            email,
-            name: employeeName,
-            employeeId,
-            department: dept.name,
-            role: role.name,
-          },
-        });
-        console.log(`Welcome email sent to ${email}`);
-      } catch (emailError) {
-        console.error('Error sending welcome email:', emailError);
-        // Don't block user creation if email fails
-      }
+      // NOTE: Welcome email notification can be implemented through:
+      // 1. AWS Cognito post-confirmation trigger (automatic when user confirms email)
+      // 2. AppSync mutation with Lambda resolver
+      // 3. Custom HTTP endpoint
+      // Admin can manually send password reset email from the user details view.
 
       // Reload users from backend to stay in sync
       await loadUsers();
