@@ -4,7 +4,6 @@ import { postConfirmation } from './post-confirmation/resource';
 /**
  * Define and configure your auth resource
  * Admin-only user creation - self signup is disabled
- * Post-confirmation trigger automatically sends welcome email
  * @see https://docs.amplify.aws/gen2/build-a-backend/auth
  */
 export const auth = defineAuth({

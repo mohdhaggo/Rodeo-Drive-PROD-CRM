@@ -4,7 +4,6 @@
   "description": "Post-confirmation Lambda trigger for Cognito",
   "main": "handler.ts",
   "dependencies": {
-    "@aws-sdk/client-ses": "^3.0.0",
     "aws-lambda": "^1.0.7"
   },
   "devDependencies": {
