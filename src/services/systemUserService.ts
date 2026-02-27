@@ -1,5 +1,6 @@
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify/data/resource';
+import { signUp, resetPassword, resendSignUpCode } from 'aws-amplify/auth';
 
 // Lazy initialization of client - creates it on first use after Amplify is configured
 let clientInstance: ReturnType<typeof generateClient<Schema>> | null = null;
@@ -109,7 +110,7 @@ export const systemUserService = {
   },
 
   /**
-   * Create a new system user
+   * Create a new system user with Cognito authentication
    */
   async createUser(userData: Omit<SystemUser, 'id'>) {
     try {
@@ -119,16 +120,117 @@ export const systemUserService = {
         throw new Error('Employee ID already exists');
       }
 
+      // Generate a temporary password for the user
+      const tempPassword = this.generateTemporaryPassword();
+
+      // Create Cognito user with email verification
+      try {
+        await signUp({
+          username: userData.email,
+          password: tempPassword,
+          options: {
+            userAttributes: {
+              email: userData.email,
+              name: userData.name,
+            },
+            autoSignIn: false,
+          },
+        });
+        
+        console.log('Cognito user created. Verification email sent to:', userData.email);
+      } catch (cognitoError: any) {
+        console.error('Cognito user creation error:', cognitoError);
+        if (cognitoError.name === 'UsernameExistsException') {
+          throw new Error('A user with this email already exists in the system');
+        }
+        throw new Error('Failed to create authentication account: ' + cognitoError.message);
+      }
+
+      // Create user in database
       const client = getClient();
       const { data, errors } = await client.models.SystemUser.create(userData);
       if (errors) {
-        console.error('Error creating user:', errors);
-        throw new Error('Failed to create user');
+        console.error('Error creating user in database:', errors);
+        throw new Error('Failed to create user in database');
       }
+
+      console.log('User created successfully in database');
+      
       return data;
     } catch (error) {
       console.error('Error in createUser:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Generate a secure temporary password
+   */
+  generateTemporaryPassword(): string {
+    const length = 12;
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const symbols = '!@#$%^&*';
+    const allChars = uppercase + lowercase + numbers + symbols;
+    
+    let password = '';
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += symbols[Math.floor(Math.random() * symbols.length)];
+    
+    for (let i = 4; i < length; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+    
+    return password.split('').sort(() => Math.random() - 0.5).join('');
+  },
+
+  /**
+   * Send password reset email to user via Cognito
+   */
+  async sendPasswordResetEmail(email: string) {
+    try {
+      await resetPassword({ username: email });
+      console.log('Password reset email sent to:', email);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error sending password reset email:', error);
+      
+      // Handle specific Cognito errors
+      if (error.name === 'InvalidParameterException' || error.message?.includes('no registered/verified email')) {
+        throw new Error('The user has not verified their email address yet. Please ask the user to check their email and verify their account first.');
+      }
+      
+      if (error.name === 'UserNotFoundException') {
+        throw new Error('User not found in the authentication system.');
+      }
+      
+      throw new Error('Failed to send password reset email: ' + error.message);
+    }
+  },
+
+  /**
+   * Resend verification email to user via Cognito
+   */
+  async resendVerificationEmail(email: string) {
+    try {
+      await resendSignUpCode({ username: email });
+      console.log('Verification email resent to:', email);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Error resending verification email:', error);
+      
+      if (error.name === 'UserNotFoundException') {
+        throw new Error('User not found in the authentication system.');
+      }
+      
+      if (error.name === 'InvalidParameterException' && error.message?.includes('already confirmed')) {
+        throw new Error('This user has already verified their email address.');
+      }
+      
+      throw new Error('Failed to resend verification email: ' + error.message);
     }
   },
 

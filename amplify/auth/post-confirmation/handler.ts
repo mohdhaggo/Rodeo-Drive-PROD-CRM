@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import type { PostConfirmationTriggerEvent } from 'aws-lambda';
 

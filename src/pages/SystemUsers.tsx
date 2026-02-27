@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify/data/resource';
+import { systemUserService } from '../services/systemUserService';
 import './DepartmentRole.css';
 
 // Frontend-enriched user type (backend fields + resolved names)
@@ -237,7 +238,9 @@ const SystemUsers: React.FC = () => {
 
     try {
       setIsLoading(true);
-      const { data, errors } = await client.models.SystemUser.create({
+      
+      // Create user in both Cognito and database
+      await systemUserService.createUser({
         employeeId,
         name: employeeName,
         email,
@@ -250,22 +253,6 @@ const SystemUsers: React.FC = () => {
         failedLoginAttempts: 0,
         createdDate: new Date().toISOString(),
       });
-
-      if (errors || !data) {
-        console.error('Error creating user:', errors);
-        showAlertMessage({
-          title: 'Error',
-          message: 'Failed to create user. Please try again.',
-          type: 'error',
-        });
-        return;
-      }
-
-      // NOTE: Welcome email notification can be implemented through:
-      // 1. AWS Cognito post-confirmation trigger (automatic when user confirms email)
-      // 2. AppSync mutation with Lambda resolver
-      // 3. Custom HTTP endpoint
-      // Admin can manually send password reset email from the user details view.
 
       // Reload users from backend to stay in sync
       await loadUsers();
@@ -282,14 +269,14 @@ const SystemUsers: React.FC = () => {
       closeAllModals();
       showAlertMessage({
         title: 'Success',
-        message: 'User added successfully!',
+        message: `User created successfully! A verification email with temporary password has been sent to ${email}. IMPORTANT: The user must verify their email before you can send password reset emails.`,
         type: 'success',
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating user:', error);
       showAlertMessage({
         title: 'Error',
-        message: 'Failed to create user. Please try again.',
+        message: error.message || 'Failed to create user. Please try again.',
         type: 'error',
       });
     } finally {
@@ -444,6 +431,45 @@ const SystemUsers: React.FC = () => {
     });
   };
 
+  const handleResendVerification = () => {
+    if (!viewingUser) return;
+    
+    showAlertMessage({
+      title: 'Resend Verification Email',
+      message: `Resend verification email to ${viewingUser.email}?`,
+      type: 'info',
+      buttons: [
+        {
+          text: 'Send',
+          class: 'alert-btn-primary',
+          action: async () => {
+            closeAlert();
+            try {
+              await systemUserService.resendVerificationEmail(viewingUser.email);
+              showAlertMessage({
+                title: 'Success',
+                message: `Verification email resent to ${viewingUser.email}. The user will receive an email with a link to verify their account.`,
+                type: 'success',
+              });
+            } catch (error: any) {
+              console.error('Error resending verification email:', error);
+              showAlertMessage({
+                title: 'Error',
+                message: error.message || 'Failed to resend verification email. Please try again.',
+                type: 'error',
+              });
+            }
+          },
+        },
+       {
+          text: 'Cancel',
+          class: 'alert-btn-secondary',
+          action: closeAlert,
+        },
+      ],
+    });
+  };
+
   const openViewDetailsModal = (user: SystemUser) => {
     setViewingUser(user);
     setUserIsActive(user.isActive);
@@ -527,15 +553,23 @@ const SystemUsers: React.FC = () => {
         {
           text: 'Send',
           class: 'alert-btn-primary',
-          action: () => {
-            // In a real scenario, this would call the Lambda function to send email
-            console.log(`Reset password email sent to ${viewingUser.email}`);
+          action: async () => {
             closeAlert();
-            showAlertMessage({
-              title: 'Success',
-              message: `Password reset email sent to ${viewingUser.email}`,
-              type: 'success',
-            });
+            try {
+              await systemUserService.sendPasswordResetEmail(viewingUser.email);
+              showAlertMessage({
+                title: 'Success',
+                message: `Password reset email sent to ${viewingUser.email}. The user will receive an email with instructions to reset their password.`,
+                type: 'success',
+              });
+            } catch (error: any) {
+              console.error('Error sending password reset email:', error);
+              showAlertMessage({
+                title: 'Error',
+                message: error.message || 'Failed to send password reset email. Please try again.',
+                type: 'error',
+              });
+            }
           },
         },
        {
@@ -983,6 +1017,19 @@ const SystemUsers: React.FC = () => {
                     </button>
                     <span className="button-description">
                       Send password reset email to {viewingUser.email}
+                    </span>
+                  </div>
+
+                  <div className="access-item button-item">
+                    <button
+                      className="btn btn-info"
+                      onClick={handleResendVerification}
+                    >
+                      <i className="fas fa-envelope"></i>
+                      Resend Verification Email
+                    </button>
+                    <span className="button-description">
+                      Resend verification email if user hasn't verified yet
                     </span>
                   </div>
                 </div>

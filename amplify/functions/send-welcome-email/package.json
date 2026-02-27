@@ -1,9 +1,0 @@
-{
-  "name": "send-welcome-email",
-  "version": "1.0.0",
-  "description": "Lambda function to send welcome emails to new users",
-  "main": "handler.ts",
-  "dependencies": {
-    "@aws-sdk/client-ses": "^3.0.0"
-  }
-}
