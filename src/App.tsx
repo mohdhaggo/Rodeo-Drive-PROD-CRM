@@ -6,6 +6,7 @@ import '@aws-amplify/ui-react/styles.css';
 import './App.css';
 import MainLayout from './components/MainLayout';
 import DepartmentRole from './pages/DepartmentRole';
+import SystemUsers from './pages/SystemUsers';
 // Import other page components as needed
 
 Amplify.configure(outputs);
@@ -46,6 +47,8 @@ export default function App() {
         );
       case 'department-role':
         return <DepartmentRole />;
+      case 'system-users':
+        return <SystemUsers />;
       // Add other cases for different pages
       default:
         return (

@@ -28,6 +28,7 @@ export interface SystemUser {
   lineManagerId?: string | null;
   status: 'active' | 'inactive';
   dashboardAccess: 'allowed' | 'blocked';
+  failedLoginAttempts: number;
   createdDate: string;
 }
 

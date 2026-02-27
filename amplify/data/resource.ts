@@ -38,6 +38,7 @@ const schema = a.schema({
       lineManagerId: a.id(),
       status: a.enum(['active', 'inactive']),
       dashboardAccess: a.enum(['allowed', 'blocked']),
+      failedLoginAttempts: a.integer().default(0),
       createdDate: a.string().required(),
     })
     .authorization((allow) => [allow.publicApiKey()]),
