@@ -519,11 +519,6 @@ const SystemUsers: React.FC = () => {
       type: 'info',
       buttons: [
         {
-          text: 'Cancel',
-          class: 'alert-btn-secondary',
-          action: closeAlert,
-        },
-        {
           text: 'Send',
           class: 'alert-btn-primary',
           action: () => {
@@ -536,6 +531,11 @@ const SystemUsers: React.FC = () => {
               type: 'success',
             });
           },
+        },
+       {
+          text: 'Cancel',
+          class: 'alert-btn-secondary',
+          action: closeAlert,
         },
       ],
     });
