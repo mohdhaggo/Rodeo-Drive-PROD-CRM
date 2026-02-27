@@ -27,6 +27,20 @@ const schema = a.schema({
       department: a.belongsTo("Department", "departmentId"),
     })
     .authorization((allow) => [allow.publicApiKey()]),
+  SystemUser: a
+    .model({
+      employeeId: a.string().required(),
+      name: a.string().required(),
+      email: a.string().required(),
+      mobile: a.string().required(),
+      departmentId: a.id().required(),
+      roleId: a.id().required(),
+      lineManagerId: a.id(),
+      status: a.enum(['active', 'inactive']),
+      dashboardAccess: a.enum(['allowed', 'blocked']),
+      createdDate: a.string().required(),
+    })
+    .authorization((allow) => [allow.publicApiKey()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;
