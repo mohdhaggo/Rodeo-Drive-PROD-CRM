@@ -391,3 +391,25 @@ body {
     border: 1px solid #ddd;
   }
 }
+
+/* Forgot Password Link Styling */
+.amplify-authenticator {
+  --amplify-colors-brand-primary-10: #667eea;
+  --amplify-colors-brand-primary-20: #764ba2;
+}
+
+.forgot-password-link {
+  font-size: 14px;
+  color: #667eea;
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: color 0.3s ease;
+  margin-top: 10px;
+  display: inline-block;
+}
+
+.forgot-password-link:hover {
+  color: #764ba2;
+  text-decoration: underline;
+}

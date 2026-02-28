@@ -1,4 +1,7 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
+import { adminCreateUserFunction } from '../auth/admin-create-user/resource';
+import { adminResetUserPasswordFunction } from '../auth/admin-reset-password/resource';
+import { adminDeleteUserFunction } from '../auth/admin-delete-user/resource';
 
 /*== STEP 1 ===============================================================
 The section below creates a Todo database table with a "content" field. Try
@@ -42,6 +45,53 @@ const schema = a.schema({
       createdDate: a.string().required(),
     })
     .authorization((allow) => [allow.publicApiKey()]),
+  
+  // Custom mutation for creating Cognito users
+  createUser: a
+    .mutation()
+    .arguments({
+      email: a.string().required(),
+      name: a.string().required(),
+      password: a.string().required(),
+    })
+    .returns(
+      a.customType({
+        success: a.boolean().required(),
+        username: a.string(),
+      })
+    )
+    .handler(a.handler.function(adminCreateUserFunction))
+    .authorization((allow) => [allow.publicApiKey(), allow.authenticated()]),
+
+  // Custom mutation for admin password reset with temporary password
+  adminResetUserPassword: a
+    .mutation()
+    .arguments({
+      email: a.string().required(),
+    })
+    .returns(
+      a.customType({
+        success: a.boolean().required(),
+        message: a.string(),
+      })
+    )
+    .handler(a.handler.function(adminResetUserPasswordFunction))
+    .authorization((allow) => [allow.publicApiKey(), allow.authenticated()]),
+
+  // Custom mutation for deleting Cognito users
+  adminDeleteUser: a
+    .mutation()
+    .arguments({
+      email: a.string().required(),
+    })
+    .returns(
+      a.customType({
+        success: a.boolean().required(),
+        message: a.string(),
+      })
+    )
+    .handler(a.handler.function(adminDeleteUserFunction))
+    .authorization((allow) => [allow.publicApiKey(), allow.authenticated()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;

@@ -1,6 +1,7 @@
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../amplify/data/resource';
-import { signUp, resetPassword, resendSignUpCode } from 'aws-amplify/auth';
+import { resendSignUpCode, fetchAuthSession } from 'aws-amplify/auth';
+import outputs from '../../amplify_outputs.json';
 
 // Lazy initialization of client - creates it on first use after Amplify is configured
 let clientInstance: ReturnType<typeof generateClient<Schema>> | null = null;
@@ -128,9 +129,28 @@ export const systemUserService = {
       throw error;
     }
   },
-
   /**
-   * Create a new system user with Cognito authentication
+   * Get user by email
+   */
+  async getUserByEmail(email: string) {
+    try {
+      const client = getClient();
+      const { data, errors } = await client.models.SystemUser.list({
+        filter: { email: { eq: email } },
+      });
+      if (errors) {
+        console.error('Error fetching user by email:', errors);
+        throw new Error('Failed to fetch user');
+      }
+      return data[0] || null;
+    } catch (error) {
+      console.error('Error in getUserByEmail:', error);
+      throw error;
+    }
+  },
+  /**
+   * Create a new system user with Cognito authentication using AdminCreateUser
+   * Sends invitation email with custom template and temporary password
    */
   async createUser(userData: Omit<SystemUser, 'id'>) {
     try {
@@ -140,36 +160,100 @@ export const systemUserService = {
         throw new Error('Employee ID already exists');
       }
 
+      // Check if email already exists
+      const existingEmail = await this.getUserByEmail(userData.email);
+      if (existingEmail) {
+        throw new Error('Email address already exists');
+      }
+
       // Generate a temporary password for the user
       const tempPassword = this.generateTemporaryPassword();
 
-      // Create Cognito user with email verification
+      // Create Cognito user via Lambda (skipped if no auth session, e.g. dev bypass mode)
+      let hasAuthSession = false;
       try {
-        await signUp({
-          username: userData.email,
-          password: tempPassword,
-          options: {
-            userAttributes: {
-              email: userData.email,
-              name: userData.name,
-            },
-            autoSignIn: false,
-          },
-        });
-        
-        console.log('Cognito user created. Verification email sent to:', userData.email);
-      } catch (cognitoError: unknown) {
-        console.error('Cognito user creation error:', cognitoError);
-        const details = getErrorDetails(cognitoError);
-        if (details.name === 'UsernameExistsException') {
-          throw new Error('A user with this email already exists in the system');
+        const session = await fetchAuthSession();
+        const accessToken = session.tokens?.accessToken?.toString() ?? '';
+        hasAuthSession = !!accessToken;
+      } catch {
+        hasAuthSession = false;
+      }
+
+      if (hasAuthSession) {
+        try {
+          const session = await fetchAuthSession();
+          const accessToken = session.tokens?.accessToken?.toString() ?? '';
+
+          console.log('Creating user via Lambda with email:', userData.email);
+          
+          // Call Lambda via AppSync endpoint
+          const response = await fetch(
+            outputs.data.url,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': accessToken,
+              },
+              body: JSON.stringify({
+                query: `
+                  mutation CreateUser($email: String!, $name: String!, $password: String!) {
+                    createUser(email: $email, name: $name, password: $password) {
+                      success
+                      username
+                    }
+                  }
+                `,
+                variables: {
+                  email: userData.email,
+                  name: userData.name,
+                  password: tempPassword,
+                },
+              }),
+            }
+          );
+
+          // Check if response is OK before parsing
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+          }
+
+          // Check if response has content
+          const contentType = response.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            throw new Error(`Expected JSON response but got: ${contentType || 'no content-type'}`);
+          }
+
+          const result = await response.json() as { data?: { createUser?: { success: boolean } }; errors?: Array<{ message: string }> };
+          
+          if (result.errors && result.errors.length > 0) {
+            throw new Error(result.errors[0].message);
+          }
+
+          if (!result.data?.createUser?.success) {
+            throw new Error('Failed to create Cognito user');
+          }
+
+          console.log('Cognito user created via Lambda. Invitation email sent to:', userData.email);
+        } catch (cognitoError: unknown) {
+          console.error('Cognito user creation error:', cognitoError);
+          const errorMsg = cognitoError instanceof Error ? cognitoError.message : 'Unknown error';
+          
+          // Provide more user-friendly error messages
+          if (errorMsg.includes('already exists') || errorMsg.includes('UsernameExistsException')) {
+            throw new Error('This email address is already registered in the system. Please use a different email or contact the administrator.');
+          }
+          
+          throw new Error('Failed to create authentication account: ' + errorMsg);
         }
-        throw new Error('Failed to create authentication account: ' + getErrorMessage(cognitoError, 'Unknown error'));
+      } else {
+        console.warn('⚠️ DEV BYPASS: No auth session found. Skipping Cognito user creation. DB record will still be created.');
       }
 
       // Create user in database
-      const client = getClient();
-      const { data, errors } = await client.models.SystemUser.create(userData);
+      const dbClient = getClient();
+      const { data, errors } = await dbClient.models.SystemUser.create(userData);
       if (errors) {
         console.error('Error creating user in database:', errors);
         throw new Error('Failed to create user in database');
@@ -209,12 +293,27 @@ export const systemUserService = {
   },
 
   /**
-   * Send password reset email to user via Cognito
+   * Send password reset email to user via admin API
+   * Generates a temporary password and sends it via email
    */
   async sendPasswordResetEmail(email: string) {
     try {
-      await resetPassword({ username: email });
-      console.log('Password reset email sent to:', email);
+      const client = getClient();
+      const { data, errors } = await client.mutations.adminResetUserPassword({
+        email,
+      });
+
+      if (errors) {
+        console.error('GraphQL errors:', errors);
+        throw new Error('Failed to reset password');
+      }
+
+      console.log('Password reset result:', data);
+      
+      if (!data?.success) {
+        throw new Error(data?.message || 'Failed to send password reset email');
+      }
+
       return { success: true };
     } catch (error: unknown) {
       console.error('Error sending password reset email:', error);
@@ -228,7 +327,7 @@ export const systemUserService = {
       if (details.name === 'UserNotFoundException') {
         throw new Error('User not found in the authentication system.');
       }
-      
+
       throw new Error('Failed to send password reset email: ' + getErrorMessage(error, 'Unknown error'));
     }
   },
@@ -279,16 +378,49 @@ export const systemUserService = {
   },
 
   /**
-   * Delete a system user
+   * Delete a system user (both from Cognito and database)
    */
   async deleteUser(id: string) {
     try {
       const client = getClient();
+      
+      // First, get the user to retrieve their email
+      const { data: userData, errors: getUserErrors } = await client.models.SystemUser.get({ id });
+      if (getUserErrors || !userData) {
+        console.error('Error getting user for deletion:', getUserErrors);
+        throw new Error('Failed to find user to delete');
+      }
+
+      const userEmail = userData.email;
+      console.log('Deleting user from Cognito with email:', userEmail);
+
+      // Delete from Cognito first using the mutation
+      try {
+        const { data: cognitoResult, errors: cognitoErrors } = await client.mutations.adminDeleteUser({
+          email: userEmail,
+        });
+
+        if (cognitoErrors) {
+          console.error('Error deleting user from Cognito:', cognitoErrors);
+          // Continue to delete from DB even if Cognito deletion fails (user might not exist in Cognito)
+          console.warn('Continuing to delete from database despite Cognito error');
+        } else if (cognitoResult?.success) {
+          console.log('Successfully deleted user from Cognito:', cognitoResult.message);
+        }
+      } catch (cognitoError) {
+        console.error('Exception deleting user from Cognito:', cognitoError);
+        // Continue to delete from DB even if Cognito deletion fails
+        console.warn('Continuing to delete from database despite Cognito exception');
+      }
+
+      // Delete from database
       const { data, errors } = await client.models.SystemUser.delete({ id });
       if (errors) {
-        console.error('Error deleting user:', errors);
-        throw new Error('Failed to delete user');
+        console.error('Error deleting user from database:', errors);
+        throw new Error('Failed to delete user from database');
       }
+      
+      console.log('Successfully deleted user from database');
       return data;
     } catch (error) {
       console.error('Error in deleteUser:', error);

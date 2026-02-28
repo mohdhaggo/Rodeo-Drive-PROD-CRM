@@ -5,6 +5,14 @@ const postConfirmation = defineFunction({
   entry: './post-confirmation/handler.ts',
 });
 
+const customMessage = defineFunction({
+  name: 'custom-message',
+  entry: './custom-message/handler.ts',
+  environment: {
+    APP_DOMAIN_URL: 'https://main.d2twgrdrz02e5i.amplifyapp.com/', // Change to your actual app URL
+  },
+});
+
 /**
  * Define and configure your auth resource
  * Admin-only user creation - self signup is disabled
@@ -23,5 +31,6 @@ export const auth = defineAuth({
   },
   triggers: {
     postConfirmation,
+    customMessage,
   },
 });
